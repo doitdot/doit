@@ -1,0 +1,26 @@
+{
+  "realm": "doit",
+  "enabled": true,
+  "registrationAllowed": true,
+  "clients": [
+    {
+      "clientId": "doit-api",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "dev-client-secret-change-me",
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "redirectUris": ["http://localhost:3000/*"],
+      "webOrigins": ["http://localhost:3000"]
+    },
+    {
+      "clientId": "doit-mobile",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "redirectUris": ["doit://oauth/callback", "exp://localhost:8081/*"],
+      "webOrigins": ["*"]
+    }
+  ]
+}
