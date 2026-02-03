@@ -50,11 +50,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Lint
-        # Run lint on the mobile package
         run: pnpm --filter @doit/mobile lint
 
       - name: Test
-        # Run tests on the mobile package
         run: pnpm --filter @doit/mobile test
 
       - name: Prebuild Android
