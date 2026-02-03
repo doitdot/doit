@@ -27,7 +27,6 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '17'
-          cache: 'gradle'
 
       - name: Install pnpm
         uses: pnpm/action-setup@v2
@@ -52,11 +51,11 @@ jobs:
 
       - name: Lint
         # Run lint on the mobile package
-        run: pnpm lint --filter @doit/mobile
+        run: pnpm --filter @doit/mobile lint
 
       - name: Test
         # Run tests on the mobile package
-        run: pnpm test --filter @doit/mobile
+        run: pnpm --filter @doit/mobile test
 
       - name: Prebuild Android
         working-directory: apps/mobile
