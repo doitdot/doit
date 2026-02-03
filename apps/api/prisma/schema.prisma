@@ -6,3 +6,223 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// User & Auth
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  handle    String   @unique
+  avatarUrl String?
+  bio       String?
+  timezone  String   @default("UTC")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  devices             Device[]
+  routines            Routine[]
+  checkIns            CheckIn[]
+  sentFriendships     Friendship[]   @relation("Requester")
+  receivedFriendships Friendship[]   @relation("Addressee")
+  judgments           Judgment[]
+  jokers              Joker[]
+  notifications       Notification[]
+  messages            Message[]
+  media               Media[]
+
+  // Reporting
+  filedReports    Report[] @relation("Reporter")
+  receivedReports Report[] @relation("ReportedUser")
+
+  // Conversations
+  conversationParticipations ConversationParticipant[]
+}
+
+model Device {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  platform  String // ios, android
+  pushToken String?
+  lastSeen  DateTime @default(now())
+}
+
+// Networking
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  BLOCKED
+}
+
+model Friendship {
+  id          String           @id @default(uuid())
+  requesterId String
+  requester   User             @relation("Requester", fields: [requesterId], references: [id])
+  addresseeId String
+  addressee   User             @relation("Addressee", fields: [addresseeId], references: [id])
+  status      FriendshipStatus @default(PENDING)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([requesterId, addresseeId])
+}
+
+// Core Gameplay
+model Routine {
+  id         String   @id @default(uuid())
+  ownerId    String
+  owner      User     @relation(fields: [ownerId], references: [id])
+  title      String
+  schedule   Json // { days: [1,3,5], timeWindow: "09:00-12:00" }
+  visibility String   @default("FRIENDS")
+  rules      Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  checkIns CheckIn[]
+}
+
+enum CheckInStatus {
+  PENDING
+  JUDGED
+  EXPIRED
+}
+
+model CheckIn {
+  id        String        @id @default(uuid())
+  routineId String
+  routine   Routine       @relation(fields: [routineId], references: [id])
+  userId    String
+  user      User          @relation(fields: [userId], references: [id])
+  dayKey    String // YYYY-MM-DD
+  status    CheckInStatus @default(PENDING)
+
+  mediaId String? @unique
+  media   Media?  @relation(fields: [mediaId], references: [id])
+
+  judgingDeadline DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  judgments Judgment[]
+  joker     Joker?
+}
+
+model Media {
+  id                String    @id @default(uuid())
+  ownerId           String
+  owner             User      @relation(fields: [ownerId], references: [id])
+  objectKeyOriginal String
+  objectKeyThumb    String
+  mimeType          String
+  size              Int
+  checksum          String
+  createdAt         DateTime  @default(now())
+  expiresAt         DateTime?
+
+  checkIn CheckIn?
+}
+
+enum Verdict {
+  DID_IT
+  DIDNT_DO_IT
+  ACCEPT_JOKER
+  GUILTY_JOKER
+}
+
+model Judgment {
+  id          String   @id @default(uuid())
+  checkInId   String
+  checkIn     CheckIn  @relation(fields: [checkInId], references: [id])
+  judgeUserId String
+  judgeUser   User     @relation(fields: [judgeUserId], references: [id])
+  verdict     Verdict
+  createdAt   DateTime @default(now())
+
+  @@unique([checkInId, judgeUserId])
+}
+
+enum JokerStatus {
+  PENDING
+  ACCEPTED
+  GUILTY
+}
+
+model Joker {
+  id        String      @id @default(uuid())
+  checkInId String      @unique
+  checkIn   CheckIn     @relation(fields: [checkInId], references: [id])
+  userId    String
+  user      User        @relation(fields: [userId], references: [id])
+  text      String
+  status    JokerStatus @default(PENDING)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+}
+
+// Messaging
+model Conversation {
+  id        String   @id @default(uuid())
+  type      String // dm, group
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages     Message[]
+  participants ConversationParticipant[]
+}
+
+model ConversationParticipant {
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  joinedAt       DateTime     @default(now())
+
+  @@id([conversationId, userId])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id])
+  body           String
+  readReceipts   Json?
+  createdAt      DateTime     @default(now())
+}
+
+// Notifications
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  type      String
+  payload   Json?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+// Moderation
+enum ReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
+model Report {
+  id         String @id @default(uuid())
+  reporterId String
+  reporter   User   @relation("Reporter", fields: [reporterId], references: [id])
+
+  targetUserId String?
+  targetUser   User?   @relation("ReportedUser", fields: [targetUserId], references: [id])
+
+  targetContentId   String? // ID of checkIn, message, etc.
+  targetContentType String? // "CHECK_IN", "MESSAGE"
+
+  reason    String
+  status    ReportStatus @default(PENDING)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
