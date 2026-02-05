@@ -6,3 +6,41 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+model User {
+  id        String   @id @default(uuid())
+  authId    String   @unique // Keycloak Subject ID
+  email     String   @unique
+  username  String   @unique
+  avatarUrl String?
+  bio       String?
+
+  sentFriendships     Friendship[] @relation("SentFriendships")
+  receivedFriendships Friendship[] @relation("ReceivedFriendships")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+model Friendship {
+  id          String           @id @default(uuid())
+  requesterid String
+  requester   User             @relation("SentFriendships", fields: [requesterid], references: [id])
+  addresseeId String
+  addressee   User             @relation("ReceivedFriendships", fields: [addresseeId], references: [id])
+  status      FriendshipStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([requesterid, addresseeId])
+  @@map("friendships")
+}
