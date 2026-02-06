@@ -19,25 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  shared:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @doit/shared build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: shared-dist-mobile
-          path: packages/shared/dist
-          retention-days: 1
-
   android:
-    needs: shared
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,10 +42,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
       - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
-        with:
-          name: shared-dist-mobile
-          path: packages/shared/dist
+      - run: pnpm --filter @doit/shared build
       - name: Expo prebuild Android
         working-directory: apps/mobile
         run: npx expo prebuild --platform android
@@ -78,7 +57,6 @@ jobs:
           retention-days: 14
 
   ios:
-    needs: shared
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -88,10 +66,7 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
-        with:
-          name: shared-dist-mobile
-          path: packages/shared/dist
+      - run: pnpm --filter @doit/shared build
       - name: Expo prebuild iOS
         working-directory: apps/mobile
         run: npx expo prebuild --platform ios

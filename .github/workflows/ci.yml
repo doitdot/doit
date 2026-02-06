@@ -44,7 +44,6 @@ jobs:
       - run: pnpm format:check
 
   shared:
-    needs: [changes]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,15 +53,10 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @doit/shared build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: shared-dist
-          path: packages/shared/dist
-          retention-days: 1
+      - run: pnpm --filter @doit/shared typecheck
 
   backend:
-    needs: [changes, shared]
+    needs: [changes]
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -73,10 +67,7 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
-        with:
-          name: shared-dist
-          path: packages/shared/dist
+      - run: pnpm --filter @doit/shared build
       - name: Generate Prisma client
         run: pnpm --filter @doit/api prisma generate
         env:
@@ -87,7 +78,7 @@ jobs:
       - run: pnpm --filter @doit/api build
 
   mobile-checks:
-    needs: [changes, shared]
+    needs: [changes]
     if: needs.changes.outputs.mobile == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -98,10 +89,7 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
-        with:
-          name: shared-dist
-          path: packages/shared/dist
+      - run: pnpm --filter @doit/shared build
       - run: pnpm --filter @doit/mobile lint
       - run: pnpm --filter @doit/mobile typecheck
       - run: pnpm --filter @doit/mobile test
