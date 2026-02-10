@@ -52,6 +52,16 @@ web-build/
 # Prisma
 apps/api/prisma/migrations/**/migration_lock.toml
 
-# Secrets
 *.pem
 credentials.json
+
+# Lockfiles (if strictly pnpm)
+package-lock.json
+yarn.lock
+
+# Test Envs
+.env.test
+
+# Misc
+.turbo
+
