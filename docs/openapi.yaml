@@ -1,0 +1,1429 @@
+openapi: 3.0.3
+info:
+  title: DoIt API Contract
+  version: 1.0.0
+  description: |
+    API contract for DoIt commitments, proof submission, social judging, Joker resolution,
+    moderation, and feed UX.
+
+    Core rule encoding:
+    - Judging starts immediately after proof submission.
+    - Default judging window is 24h and may close early if all judges vote.
+    - Verdict is majority on counted votes; ties are failure.
+    - Late/no proof is automatic failure.
+    - Joker is available only after failure, with same judges voting.
+    - Notification delivery is best-effort and never blocks verdict finalization.
+    - Product principles: social accountability over automation, fairness over convenience,
+      failure as part of the experience, and justifications as social artifacts.
+servers:
+  - url: https://api.doit.app
+    description: Production
+  - url: http://localhost:3000
+    description: Local
+security:
+  - bearerAuth: []
+tags:
+  - name: Users
+  - name: Commitments
+  - name: Proof
+  - name: Judging
+  - name: Joker
+  - name: Feed
+  - name: Comments
+  - name: Moderation
+
+paths:
+  /v1/users/me:
+    get:
+      tags: [Users]
+      summary: Get current user profile and Joker balance
+      operationId: getMe
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /v1/commitments:
+    post:
+      tags: [Commitments]
+      summary: Create commitment draft
+      description: |
+        Creates a draft commitment owned by the authenticated user.
+        Judges are selected at creation and become the only users eligible to judge after publish.
+      operationId: createCommitment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCommitmentRequest'
+      responses:
+        '201':
+          description: Draft created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitmentResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '409':
+          description: Judge list invalid for creation (for example duplicates, non-friends)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      tags: [Commitments]
+      summary: List my commitments
+      operationId: listMyCommitments
+      parameters:
+        - $ref: '#/components/parameters/StatusFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Paginated commitments owned by the current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitmentListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /v1/commitments/{commitmentId}:
+    get:
+      tags: [Commitments]
+      summary: Get commitment details
+      operationId: getCommitment
+      parameters:
+        - $ref: '#/components/parameters/CommitmentId'
+      responses:
+        '200':
+          description: Commitment details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitmentResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    patch:
+      tags: [Commitments]
+      summary: Edit draft commitment
+      description: |
+        Allowed only while status is DRAFT.
+        Judge selection is immutable after creation to preserve eligibility snapshot semantics.
+      operationId: updateCommitmentDraft
+      parameters:
+        - $ref: '#/components/parameters/CommitmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCommitmentDraftRequest'
+      responses:
+        '200':
+          description: Draft updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitmentResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Commitment is immutable once visible to judges
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags: [Commitments]
+      summary: Delete draft commitment
+      description: |
+        Allowed only in DRAFT state.
+        Published commitments cannot be deleted.
+      operationId: deleteCommitmentDraft
+      parameters:
+        - $ref: '#/components/parameters/CommitmentId'
+      responses:
+        '204':
+          description: Draft deleted
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Published commitments cannot be deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/commitments/{commitmentId}/publish:
+    post:
+      tags: [Commitments]
+      summary: Publish commitment
+      description: |
+        Makes the commitment visible to selected judges.
+        Requires at least 1 judge. Recommended judge count is 3-7 (soft validation).
+      operationId: publishCommitment
+      parameters:
+        - $ref: '#/components/parameters/CommitmentId'
+      responses:
+        '200':
+          description: Commitment published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishCommitmentResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Already published or invalid state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Minimum judges rule failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/commitments/{commitmentId}/proof/upload-url:
+    post:
+      tags: [Proof]
+      summary: Request presigned proof upload URL
+      description: |
+        Starts a direct object-storage upload session for proof media.
+        Starting upload before deadline does not satisfy submission. Proof is accepted only when
+        `/proof` confirmation is received before deadline.
+      operationId: createProofUpload
+      parameters:
+        - $ref: '#/components/parameters/CommitmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProofUploadRequest'
+      responses:
+        '200':
+          description: Upload URL issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateProofUploadResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Photo fingerprint reuse blocked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/commitments/{commitmentId}/proof:
+    post:
+      tags: [Proof]
+      summary: Submit proof for judging
+      description: |
+        Confirms uploaded proof and starts judging immediately.
+
+        Rules:
+        - Must be submitted before commitment deadline.
+        - Default judging duration is 24h.
+        - Late proof causes automatic failure (owner may still use Joker if available).
+        - Proof photos are immutable after submission.
+      operationId: submitProof
+      parameters:
+        - $ref: '#/components/parameters/CommitmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitProofRequest'
+      responses:
+        '201':
+          description: Proof accepted, judging started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitmentResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Invalid proof state (already submitted or late/failed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/commitments/{commitmentId}/judge-votes:
+    post:
+      tags: [Judging]
+      summary: Cast commitment judgment vote
+      description: |
+        Vote once as selected judge: ACHIEVED or NOT_ACHIEVED.
+
+        Rules:
+        - Owner cannot vote.
+        - Only selected judges can vote.
+        - Vote is final and cannot be changed or deleted.
+        - Judges who remove friendship remain eligible.
+        - If all active selected judges vote before deadline, judging closes early.
+      operationId: castJudgeVote
+      parameters:
+        - $ref: '#/components/parameters/CommitmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CastJudgeVoteRequest'
+      responses:
+        '201':
+          description: Vote accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JudgeVoteResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Duplicate vote or judging closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/commitments/{commitmentId}/joker:
+    post:
+      tags: [Joker]
+      summary: Submit Joker justification
+      description: |
+        Creates Joker request after a failed verdict.
+
+        Rules:
+        - User starts with 1 Joker.
+        - Joker can only be used after failed verdict.
+        - Text justification is required and visible to same judges.
+      operationId: submitJoker
+      parameters:
+        - $ref: '#/components/parameters/CommitmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitJokerRequest'
+      responses:
+        '201':
+          description: Joker entered pending vote state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitmentResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Joker unavailable or already used for this commitment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/commitments/{commitmentId}/joker-votes:
+    post:
+      tags: [Joker]
+      summary: Cast Joker accept/reject vote
+      description: |
+        Selected judges vote once to ACCEPT or REJECT Joker.
+
+        Rules:
+        - Same judges as initial commitment judging.
+        - Majority ACCEPT => final outcome FORGIVEN.
+        - Majority REJECT or tie => final outcome GUILTY.
+      operationId: castJokerVote
+      parameters:
+        - $ref: '#/components/parameters/CommitmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CastJokerVoteRequest'
+      responses:
+        '201':
+          description: Joker vote accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JokerVoteResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Duplicate Joker vote or Joker voting closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/feed:
+    get:
+      tags: [Feed]
+      summary: List social feed items
+      description: |
+        Feed can include owned commitments and friend commitments visible to the user.
+        Ordered by most recent activity.
+      operationId: listFeed
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Paginated feed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /v1/judging/inbox:
+    get:
+      tags: [Judging]
+      summary: List commitments awaiting my vote
+      operationId: listJudgingInbox
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Paginated judging queue for current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JudgingInboxResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /v1/commitments/{commitmentId}/comments:
+    get:
+      tags: [Comments]
+      summary: List commitment comments
+      operationId: listCommitmentComments
+      parameters:
+        - $ref: '#/components/parameters/CommitmentId'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Paginated comments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    post:
+      tags: [Comments]
+      summary: Add commitment comment
+      operationId: createCommitmentComment
+      parameters:
+        - $ref: '#/components/parameters/CommitmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCommentRequest'
+      responses:
+        '201':
+          description: Comment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /v1/comments/{commentId}:
+    delete:
+      tags: [Comments]
+      summary: Delete own comment
+      description: Judges may delete their own comments. Votes cannot be deleted.
+      operationId: deleteComment
+      parameters:
+        - $ref: '#/components/parameters/CommentId'
+      responses:
+        '204':
+          description: Comment deleted
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /v1/reports:
+    post:
+      tags: [Moderation]
+      summary: Report abuse
+      description: Basic abuse reporting endpoint.
+      operationId: createReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReportRequest'
+      responses:
+        '201':
+          description: Report received
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    CommitmentId:
+      name: commitmentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CommentId:
+      name: commentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Opaque cursor for forward pagination.
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 20
+    StatusFilter:
+      name: status
+      in: query
+      required: false
+      schema:
+        type: string
+        enum:
+          - DRAFT
+          - PUBLISHED
+          - JUDGING
+          - FAILED_AWAITING_JOKER
+          - JOKER_JUDGING
+          - FINALIZED
+
+  responses:
+    UnauthorizedError:
+      description: Missing or invalid authentication
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ForbiddenError:
+      description: Authenticated but not allowed for this resource/action
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ValidationError:
+      description: Invalid request payload
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    MeResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [id, username, timeZone, jokerBalance, createdAt]
+          properties:
+            id:
+              type: string
+              format: uuid
+            username:
+              type: string
+            timeZone:
+              type: string
+              example: America/Los_Angeles
+            jokerBalance:
+              type: integer
+              minimum: 0
+              description: Users start with 1 Joker.
+            createdAt:
+              type: string
+              format: date-time
+
+    CreateCommitmentRequest:
+      type: object
+      required:
+        - title
+        - deadlineAt
+        - timeZone
+        - judgeIds
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+        deadlineAt:
+          type: string
+          format: date-time
+          description: Absolute deadline timestamp. Late proof is any submission after this timestamp.
+        timeZone:
+          type: string
+          description: IANA timezone snapshot used for UX and deadline interpretation.
+          example: America/New_York
+        judgeIds:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+          description: Selected judges. Owner ID is forbidden.
+        judgingDurationHours:
+          type: integer
+          default: 24
+          enum: [24]
+          description: Default judging duration is fixed at 24h for v1.
+
+    UpdateCommitmentDraftRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+        deadlineAt:
+          type: string
+          format: date-time
+        timeZone:
+          type: string
+          example: America/Chicago
+      additionalProperties: false
+
+    PublishCommitmentResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/Commitment'
+        warnings:
+          type: array
+          description: Non-blocking product guidance such as recommended judge range 3-7.
+          items:
+            type: object
+            required: [code, message]
+            properties:
+              code:
+                type: string
+                enum: [RECOMMENDED_JUDGE_COUNT]
+              message:
+                type: string
+
+    CreateProofUploadRequest:
+      type: object
+      required: [mimeType, sizeBytes, sha256]
+      properties:
+        mimeType:
+          type: string
+          enum: [image/jpeg, image/png, image/heic, image/webp]
+        sizeBytes:
+          type: integer
+          minimum: 1
+          maximum: 10485760
+        sha256:
+          type: string
+          pattern: '^[A-Fa-f0-9]{64}$'
+          description: Used for duplicate-photo prevention.
+
+    CreateProofUploadResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [mediaId, uploadUrl, requiredHeaders, expiresAt]
+          properties:
+            mediaId:
+              type: string
+              format: uuid
+            uploadUrl:
+              type: string
+              format: uri
+            requiredHeaders:
+              type: object
+              additionalProperties:
+                type: string
+            expiresAt:
+              type: string
+              format: date-time
+
+    SubmitProofRequest:
+      type: object
+      required: [mediaId]
+      properties:
+        mediaId:
+          type: string
+          format: uuid
+        note:
+          type: string
+          maxLength: 1000
+
+    CastJudgeVoteRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [ACHIEVED, NOT_ACHIEVED]
+
+    SubmitJokerRequest:
+      type: object
+      required: [justification]
+      properties:
+        justification:
+          type: string
+          minLength: 1
+          maxLength: 2000
+
+    CastJokerVoteRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [ACCEPT, REJECT]
+
+    CreateCommentRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 2000
+
+    CreateReportRequest:
+      type: object
+      required: [targetType, targetId, reason]
+      properties:
+        targetType:
+          type: string
+          enum: [COMMITMENT, COMMENT, USER]
+        targetId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        context:
+          type: string
+          maxLength: 2000
+
+    ReportResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [id, status, createdAt]
+          properties:
+            id:
+              type: string
+              format: uuid
+            status:
+              type: string
+              enum: [OPEN]
+            createdAt:
+              type: string
+              format: date-time
+
+    CommitmentListResponse:
+      type: object
+      required: [data, page]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommitmentSummary'
+        page:
+          $ref: '#/components/schemas/PageInfo'
+
+    FeedListResponse:
+      type: object
+      required: [data, page]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeedItem'
+        page:
+          $ref: '#/components/schemas/PageInfo'
+
+    JudgingInboxResponse:
+      type: object
+      required: [data, page]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/JudgingInboxItem'
+        page:
+          $ref: '#/components/schemas/PageInfo'
+
+    CommentListResponse:
+      type: object
+      required: [data, page]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+        page:
+          $ref: '#/components/schemas/PageInfo'
+
+    CommentResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/Comment'
+
+    CommitmentResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/Commitment'
+
+    JudgeVoteResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [vote, commitment]
+          properties:
+            vote:
+              $ref: '#/components/schemas/JudgeVote'
+            commitment:
+              $ref: '#/components/schemas/Commitment'
+
+    JokerVoteResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [vote, commitment]
+          properties:
+            vote:
+              $ref: '#/components/schemas/JokerVote'
+            commitment:
+              $ref: '#/components/schemas/Commitment'
+
+    Commitment:
+      type: object
+      required:
+        - id
+        - ownerId
+        - title
+        - deadlineAt
+        - timeZone
+        - status
+        - judges
+        - rules
+        - proof
+        - judging
+        - verdict
+        - joker
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        ownerId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        deadlineAt:
+          type: string
+          format: date-time
+        timeZone:
+          type: string
+        status:
+          type: string
+          enum:
+            - DRAFT
+            - PUBLISHED
+            - JUDGING
+            - FAILED_AWAITING_JOKER
+            - JOKER_JUDGING
+            - FINALIZED
+        judges:
+          type: array
+          description: Eligibility snapshot. Friendship changes do not revoke judge eligibility.
+          items:
+            $ref: '#/components/schemas/JudgeAssignment'
+        rules:
+          $ref: '#/components/schemas/RuleSnapshot'
+        proof:
+          $ref: '#/components/schemas/ProofState'
+        judging:
+          $ref: '#/components/schemas/JudgingState'
+        verdict:
+          $ref: '#/components/schemas/VerdictState'
+        joker:
+          $ref: '#/components/schemas/JokerState'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    CommitmentSummary:
+      type: object
+      required:
+        - id
+        - title
+        - owner
+        - status
+        - deadlineAt
+        - timeZone
+        - finalOutcome
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        owner:
+          $ref: '#/components/schemas/PublicUser'
+        status:
+          type: string
+          enum:
+            - DRAFT
+            - PUBLISHED
+            - JUDGING
+            - FAILED_AWAITING_JOKER
+            - JOKER_JUDGING
+            - FINALIZED
+        deadlineAt:
+          type: string
+          format: date-time
+        timeZone:
+          type: string
+        finalOutcome:
+          type: string
+          nullable: true
+          enum: [ACHIEVED, FAILED, FORGIVEN, GUILTY]
+        myRole:
+          type: string
+          enum: [OWNER, JUDGE]
+        updatedAt:
+          type: string
+          format: date-time
+
+    FeedItem:
+      type: object
+      required: [id, type, commitment, activityAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [COMMITMENT_ACTIVITY]
+        commitment:
+          $ref: '#/components/schemas/CommitmentSummary'
+        activityAt:
+          type: string
+          format: date-time
+
+    JudgingInboxItem:
+      type: object
+      required: [commitment, phase, closesAt]
+      properties:
+        commitment:
+          $ref: '#/components/schemas/CommitmentSummary'
+        phase:
+          type: string
+          enum: [INITIAL_JUDGING, JOKER_JUDGING]
+        closesAt:
+          type: string
+          format: date-time
+
+    PublicUser:
+      type: object
+      required: [id, username]
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+
+    JudgeAssignment:
+      type: object
+      required: [userId, username, selectedAt, accountState]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        username:
+          type: string
+        selectedAt:
+          type: string
+          format: date-time
+        accountState:
+          type: string
+          enum: [ACTIVE, DELETED]
+
+    RuleSnapshot:
+      type: object
+      required:
+        - judgingDurationHours
+        - tiePolicy
+        - missingVotesPolicy
+        - minJudgesToPublish
+        - jokerMajorityPolicy
+        - notificationsPolicy
+      properties:
+        judgingDurationHours:
+          type: integer
+          enum: [24]
+        tiePolicy:
+          type: string
+          enum: [FAILURE]
+          description: Ties in judging resolve to failed verdict.
+        missingVotesPolicy:
+          type: string
+          enum: [VERDICT_FROM_AVAILABLE_VOTES]
+          description: Verdict is computed from counted votes at close even if fewer than 3 judges vote.
+        evenJudgeCountAllowed:
+          type: boolean
+          example: true
+          description: Even judge counts are allowed and can produce tie outcomes by design.
+        minJudgesToPublish:
+          type: integer
+          enum: [1]
+        recommendedJudgesMin:
+          type: integer
+          example: 3
+        recommendedJudgesMax:
+          type: integer
+          example: 7
+        jokerMajorityPolicy:
+          type: string
+          enum: [REJECT_OR_TIE_IS_GUILTY]
+        notificationsPolicy:
+          type: string
+          enum: [BEST_EFFORT_NON_BLOCKING]
+
+    ProofState:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [NONE, SUBMITTED, AUTO_FAILED_NO_PROOF, AUTO_FAILED_LATE_PROOF]
+        mediaId:
+          type: string
+          format: uuid
+          nullable: true
+        mediaSha256:
+          type: string
+          nullable: true
+          description: For duplicate detection and abuse checks.
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    JudgingState:
+      type: object
+      required: [windowSeconds, voteSummary]
+      properties:
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        closesAt:
+          type: string
+          format: date-time
+          nullable: true
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+        closeReason:
+          type: string
+          nullable: true
+          enum:
+            - ALL_JUDGES_VOTED
+            - WINDOW_EXPIRED
+            - AUTO_FAILED_NO_PROOF
+            - AUTO_FAILED_LATE_PROOF
+        windowSeconds:
+          type: integer
+          enum: [86400]
+        voteSummary:
+          $ref: '#/components/schemas/JudgeVoteSummary'
+
+    JudgeVoteSummary:
+      type: object
+      required:
+        - eligibleJudgeCount
+        - countedVoteCount
+        - achievedCount
+        - notAchievedCount
+        - pendingCount
+        - tie
+      properties:
+        eligibleJudgeCount:
+          type: integer
+          minimum: 0
+        countedVoteCount:
+          type: integer
+          minimum: 0
+          description: Excludes votes from judges with deleted accounts.
+        achievedCount:
+          type: integer
+          minimum: 0
+        notAchievedCount:
+          type: integer
+          minimum: 0
+        pendingCount:
+          type: integer
+          minimum: 0
+        tie:
+          type: boolean
+
+    VerdictState:
+      type: object
+      required: [baseVerdict, finalOutcome]
+      properties:
+        baseVerdict:
+          type: string
+          nullable: true
+          enum: [ACHIEVED, FAILED]
+        finalOutcome:
+          type: string
+          nullable: true
+          enum: [ACHIEVED, FAILED, FORGIVEN, GUILTY]
+        finalizedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    JokerState:
+      type: object
+      required:
+        - eligible
+        - availableBalanceAtFailure
+        - status
+        - voteSummary
+      properties:
+        eligible:
+          type: boolean
+          description: True only when base verdict is FAILED and user has Joker balance.
+        availableBalanceAtFailure:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+          enum: [NOT_REQUESTED, PENDING, ACCEPTED, REJECTED, NOT_ELIGIBLE]
+        justification:
+          type: string
+          nullable: true
+        requestedAt:
+          type: string
+          format: date-time
+          nullable: true
+        voteSummary:
+          $ref: '#/components/schemas/JokerVoteSummary'
+
+    JokerVoteSummary:
+      type: object
+      required:
+        - eligibleJudgeCount
+        - countedVoteCount
+        - acceptCount
+        - rejectCount
+        - pendingCount
+        - tie
+      properties:
+        eligibleJudgeCount:
+          type: integer
+          minimum: 0
+        countedVoteCount:
+          type: integer
+          minimum: 0
+        acceptCount:
+          type: integer
+          minimum: 0
+        rejectCount:
+          type: integer
+          minimum: 0
+        pendingCount:
+          type: integer
+          minimum: 0
+        tie:
+          type: boolean
+
+    JudgeVote:
+      type: object
+      required: [id, commitmentId, judgeUserId, decision, createdAt, counted]
+      properties:
+        id:
+          type: string
+          format: uuid
+        commitmentId:
+          type: string
+          format: uuid
+        judgeUserId:
+          type: string
+          format: uuid
+        decision:
+          type: string
+          enum: [ACHIEVED, NOT_ACHIEVED]
+        createdAt:
+          type: string
+          format: date-time
+        counted:
+          type: boolean
+          description: False when judge account is deleted.
+
+    JokerVote:
+      type: object
+      required: [id, commitmentId, judgeUserId, decision, createdAt, counted]
+      properties:
+        id:
+          type: string
+          format: uuid
+        commitmentId:
+          type: string
+          format: uuid
+        judgeUserId:
+          type: string
+          format: uuid
+        decision:
+          type: string
+          enum: [ACCEPT, REJECT]
+        createdAt:
+          type: string
+          format: date-time
+        counted:
+          type: boolean
+
+    Comment:
+      type: object
+      required: [id, commitmentId, author, body, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        commitmentId:
+          type: string
+          format: uuid
+        author:
+          $ref: '#/components/schemas/PublicUser'
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    PageInfo:
+      type: object
+      required: [nextCursor, hasMore]
+      properties:
+        nextCursor:
+          type: string
+          nullable: true
+        hasMore:
+          type: boolean
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              $ref: '#/components/schemas/ErrorCode'
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                $ref: '#/components/schemas/ErrorDetail'
+            requestId:
+              type: string
+
+    ErrorDetail:
+      type: object
+      required: [field, issue]
+      properties:
+        field:
+          type: string
+          example: judgeIds[1]
+        issue:
+          type: string
+          example: USER_NOT_FRIEND
+
+    ErrorCode:
+      type: string
+      enum:
+        - VALIDATION_ERROR
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - NOT_FOUND
+        - INTERNAL_ERROR
+        - COMMITMENT_IMMUTABLE
+        - COMMITMENT_ALREADY_PUBLISHED
+        - MINIMUM_JUDGES_REQUIRED
+        - OWNER_CANNOT_BE_JUDGE
+        - JUDGE_NOT_FRIEND_AT_CREATION
+        - DUPLICATE_JUDGE
+        - PROOF_ALREADY_SUBMITTED
+        - PROOF_MISSING
+        - PROOF_DEADLINE_PASSED
+        - AUTO_FAILED_LATE_PROOF
+        - AUTO_FAILED_NO_PROOF
+        - PHOTO_REUSE_NOT_ALLOWED
+        - JUDGE_NOT_ELIGIBLE
+        - OWNER_CANNOT_JUDGE
+        - DUPLICATE_VOTE
+        - VOTE_WINDOW_CLOSED
+        - JOKER_NOT_AVAILABLE
+        - JOKER_ALREADY_SUBMITTED
+        - JOKER_VOTE_WINDOW_CLOSED
+        - DUPLICATE_JOKER_VOTE
